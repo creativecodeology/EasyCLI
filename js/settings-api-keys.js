@@ -271,6 +271,22 @@ function hideApiKeyModal() {
     currentEditIndex = null;
 }
 
+// Validate URL format for API endpoints
+function validateBaseUrl(url) {
+    if (!url || url.trim() === '') {
+        return { valid: true, error: null }; // Empty is valid (optional for some types)
+    }
+    try {
+        const parsed = new URL(url.trim());
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return { valid: false, error: 'Only HTTP and HTTPS URLs are supported' };
+        }
+        return { valid: true, error: null };
+    } catch (e) {
+        return { valid: false, error: 'Invalid URL format' };
+    }
+}
+
 function saveApiKey() {
     const apiKey = apiKeyInput.value.trim();
     const baseUrl = baseUrlInput.value.trim();
@@ -298,6 +314,28 @@ function saveApiKey() {
             baseUrlInput.classList.add('error');
             baseUrlInput.focus();
             showError('Please fill in this field');
+            hasErrors = true;
+        }
+    }
+
+    // Validate base URL format if provided
+    if (!hasErrors && baseUrl) {
+        const urlValidation = validateBaseUrl(baseUrl);
+        if (!urlValidation.valid) {
+            baseUrlInput.classList.add('error');
+            baseUrlInput.focus();
+            showError(urlValidation.error);
+            hasErrors = true;
+        }
+    }
+
+    // Validate proxy URL format if provided
+    if (!hasErrors && proxyUrl) {
+        const proxyValidation = validateBaseUrl(proxyUrl);
+        if (!proxyValidation.valid) {
+            apiKeyProxyUrlInput.classList.add('error');
+            apiKeyProxyUrlInput.focus();
+            showError(proxyValidation.error);
             hasErrors = true;
         }
     }

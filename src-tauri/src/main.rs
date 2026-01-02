@@ -92,6 +92,46 @@ fn resolve_path(input: &str, base: Option<&Path>) -> PathBuf {
     p
 }
 
+/// Safely resolve a path and verify it stays within the expected base directory.
+/// Returns None if the resolved path would escape the base directory (path traversal attempt).
+fn resolve_path_safe(input: &str, base: &Path) -> Option<PathBuf> {
+    if input.is_empty() {
+        return None;
+    }
+
+    // Reject paths with obvious traversal attempts
+    if input.contains("..") {
+        return None;
+    }
+
+    let resolved = resolve_path(input, Some(base));
+
+    // Canonicalize both paths to resolve any symlinks and normalize
+    // If canonicalization fails (path doesn't exist yet), check component-by-component
+    let base_canonical = match base.canonicalize() {
+        Ok(p) => p,
+        Err(_) => base.to_path_buf(),
+    };
+
+    // For the resolved path, if it exists, canonicalize it
+    // Otherwise, check that it would be under base by examining components
+    if resolved.exists() {
+        if let Ok(resolved_canonical) = resolved.canonicalize() {
+            if resolved_canonical.starts_with(&base_canonical) {
+                return Some(resolved_canonical);
+            }
+            return None;
+        }
+    }
+
+    // Path doesn't exist yet - verify it's a child of base by checking prefix
+    if resolved.starts_with(&base_canonical) || resolved.starts_with(base) {
+        return Some(resolved);
+    }
+
+    None
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct VersionInfo {
     tag_name: String,
@@ -745,12 +785,16 @@ fn read_local_auth_files() -> Result<serde_json::Value, String> {
         return Ok(json!([]));
     }
     let base = p.parent().unwrap();
-    let ad = resolve_path(auth_dir, Some(base));
+    // Use safe path resolution to prevent directory traversal
+    let ad = match resolve_path_safe(auth_dir, base) {
+        Some(path) => path,
+        None => return Err("Invalid auth-dir path (possible path traversal attempt)".into()),
+    };
     if !ad.exists() {
         return Ok(json!([]));
     }
     let mut result = vec![];
-    for entry in fs::read_dir(ad).map_err(|e| e.to_string())? {
+    for entry in fs::read_dir(&ad).map_err(|e| e.to_string())? {
         let e = entry.map_err(|e| e.to_string())?;
         let path = e.path();
         if path.is_file() {
@@ -806,12 +850,22 @@ fn upload_local_auth_files(files: Vec<UploadFile>) -> Result<serde_json::Value, 
         .and_then(|v| v.as_str())
         .ok_or("auth-dir not configured in config.yaml")?;
     let base = p.parent().unwrap();
-    let ad = resolve_path(auth_dir, Some(base));
+    // Use safe path resolution to prevent directory traversal
+    let ad = match resolve_path_safe(auth_dir, base) {
+        Some(path) => path,
+        None => return Err("Invalid auth-dir path (possible path traversal attempt)".into()),
+    };
     fs::create_dir_all(&ad).map_err(|e| e.to_string())?;
     let mut success = 0usize;
     let mut errors = vec![];
     let mut error_count = 0usize;
     for f in files {
+        // Validate filename to prevent path traversal
+        if f.name.contains("..") || f.name.contains('/') || f.name.contains('\\') {
+            errors.push(format!("{}: Invalid filename", f.name));
+            error_count += 1;
+            continue;
+        }
         let path = ad.join(&f.name);
         if path.exists() {
             errors.push(format!("{}: File already exists", f.name));
@@ -844,13 +898,22 @@ fn delete_local_auth_files(filenames: Vec<String>) -> Result<serde_json::Value, 
         .and_then(|v| v.as_str())
         .ok_or("auth-dir not configured in config.yaml")?;
     let base = p.parent().unwrap();
-    let ad = resolve_path(auth_dir, Some(base));
+    // Use safe path resolution to prevent directory traversal
+    let ad = match resolve_path_safe(auth_dir, base) {
+        Some(path) => path,
+        None => return Err("Invalid auth-dir path (possible path traversal attempt)".into()),
+    };
     if !ad.exists() {
         return Err("Authentication file directory does not exist".into());
     }
     let mut success = 0usize;
     let mut error_count = 0usize;
     for name in filenames {
+        // Validate filename to prevent path traversal
+        if name.contains("..") || name.contains('/') || name.contains('\\') {
+            error_count += 1;
+            continue;
+        }
         let path = ad.join(&name);
         match fs::remove_file(&path) {
             Ok(_) => success += 1,
@@ -874,13 +937,22 @@ fn download_local_auth_files(filenames: Vec<String>) -> Result<serde_json::Value
         .and_then(|v| v.as_str())
         .ok_or("auth-dir not configured in config.yaml")?;
     let base = p.parent().unwrap();
-    let ad = resolve_path(auth_dir, Some(base));
+    // Use safe path resolution to prevent directory traversal
+    let ad = match resolve_path_safe(auth_dir, base) {
+        Some(path) => path,
+        None => return Err("Invalid auth-dir path (possible path traversal attempt)".into()),
+    };
     if !ad.exists() {
         return Err("Authentication file directory does not exist".into());
     }
     let mut files = vec![];
     let mut error_count = 0usize;
     for name in filenames {
+        // Validate filename to prevent path traversal
+        if name.contains("..") || name.contains('/') || name.contains('\\') {
+            error_count += 1;
+            continue;
+        }
         let path = ad.join(&name);
         match fs::read_to_string(&path) {
             Ok(c) => files.push(json!({"name": name, "content": c})),
@@ -1165,9 +1237,8 @@ fn start_cliproxyapi(app: tauri::AppHandle) -> Result<serde_json::Value, String>
 
     println!("[CLIProxyAPI][START] exec: {}", exec.to_string_lossy());
     println!(
-        "[CLIProxyAPI][START] args: -config {} --password {}",
-        config.to_string_lossy(),
-        password
+        "[CLIProxyAPI][START] args: -config {} --password [REDACTED]",
+        config.to_string_lossy()
     );
     let mut cmd = std::process::Command::new(&exec);
     cmd.args([
@@ -1295,9 +1366,8 @@ fn restart_cliproxyapi(app: tauri::AppHandle) -> Result<(), String> {
 
     println!("[CLIProxyAPI][RESTART] exec: {}", exec.to_string_lossy());
     println!(
-        "[CLIProxyAPI][RESTART] args: -config {} --password {}",
-        config.to_string_lossy(),
-        password
+        "[CLIProxyAPI][RESTART] args: -config {} --password [REDACTED]",
+        config.to_string_lossy()
     );
     let mut cmd = std::process::Command::new(&exec);
     cmd.args([
@@ -1528,8 +1598,16 @@ fn run_callback_server(
                     let query = pathq.splitn(2, '?').nth(1).unwrap_or("");
                     let loc =
                         build_redirect_url(&mode, &provider, base_url.clone(), local_port, query);
+                    // Include security headers in response
                     let resp = format!(
-                        "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        "HTTP/1.1 302 Found\r\n\
+                        Location: {}\r\n\
+                        Content-Length: 0\r\n\
+                        Connection: close\r\n\
+                        X-Content-Type-Options: nosniff\r\n\
+                        X-Frame-Options: DENY\r\n\
+                        Cache-Control: no-store, no-cache, must-revalidate\r\n\
+                        Pragma: no-cache\r\n\r\n",
                         loc
                     );
                     let _ = stream.write_all(resp.as_bytes());
@@ -2013,10 +2091,6 @@ fn run_keep_alive_loop(stop: Arc<AtomicBool>, port: u16, password: String) {
 
             let result = rt.block_on(async {
                 println!("[KEEP-ALIVE] Sending request to: {}", keep_alive_url);
-                println!(
-                    "[KEEP-ALIVE] Using password: {}...",
-                    &password_clone[..8.min(password_clone.len())]
-                );
                 reqwest::Client::new()
                     .get(&keep_alive_url)
                     .header("Authorization", format!("Bearer {}", &password_clone))
