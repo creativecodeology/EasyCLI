@@ -6,7 +6,8 @@ class ConfigManager {
     constructor() {
         this.type = localStorage.getItem('type') || 'local';
         this.baseUrl = localStorage.getItem('base-url');
-        this.password = localStorage.getItem('password');
+        // Use sessionStorage for password (more secure - expires with session)
+        this.password = sessionStorage.getItem('password');
         this.keepAliveInterval = null;
         this.keepAliveEnabled = false;
     }
@@ -178,8 +179,6 @@ class ConfigManager {
      * @returns {Promise<Object>} Save result
      */
     async saveGeminiWebTokens(secure1psid, secure1psidts, email) {
-        console.log('=== DEBUG: saveGeminiWebTokens ===');
-        console.log('this.type:', this.type);
         if (this.type === 'local') {
             return this.saveLocalGeminiWebTokens(secure1psid, secure1psidts, email);
         } else {
@@ -422,8 +421,8 @@ class ConfigManager {
             const port = config.port || 8317;
             const baseUrl = `http://127.0.0.1:${port}`;
 
-            // In local mode, use the random password from localStorage (set during CLIProxyAPI startup)
-            const password = localStorage.getItem('local-management-key') || '';
+            // In local mode, use the random password from sessionStorage (set during CLIProxyAPI startup)
+            const password = sessionStorage.getItem('local-management-key') || '';
 
             if (!password) {
                 throw new Error('Missing local management key. Please restart CLIProxyAPI.');
@@ -432,9 +431,6 @@ class ConfigManager {
             const apiUrl = baseUrl.endsWith('/')
                 ? `${baseUrl}v0/management/gemini-web-token`
                 : `${baseUrl}/v0/management/gemini-web-token`;
-
-            console.log('Making request to apiUrl:', apiUrl);
-            console.log('Using MANAGEMENT_KEY header with password');
 
             const response = await fetch(apiUrl, {
                 method: 'POST',
@@ -481,7 +477,7 @@ class ConfigManager {
             const config = await this.getConfig();
             const port = config.port || 8317;
             const baseUrl = `http://127.0.0.1:${port}`;
-            const password = localStorage.getItem('local-management-key') || '';
+            const password = sessionStorage.getItem('local-management-key') || '';
 
             if (!password) {
                 throw new Error('Missing local management key. Please restart CLIProxyAPI.');
@@ -530,7 +526,7 @@ class ConfigManager {
             const config = await this.getConfig();
             const port = config.port || 8317;
             const baseUrl = `http://127.0.0.1:${port}`;
-            const password = localStorage.getItem('local-management-key') || '';
+            const password = sessionStorage.getItem('local-management-key') || '';
 
             if (!password) {
                 throw new Error('Missing local management key. Please restart CLIProxyAPI.');
@@ -668,11 +664,6 @@ class ConfigManager {
      */
     async getRemoteConfig() {
         try {
-            console.log('=== DEBUG: getRemoteConfig ===');
-            console.log('this.baseUrl:', this.baseUrl);
-            console.log('this.password exists:', !!this.password);
-            console.log('localStorage base-url:', localStorage.getItem('base-url'));
-
             if (!this.baseUrl || !this.password) {
                 throw new Error('Missing connection information');
             }
@@ -680,8 +671,6 @@ class ConfigManager {
             const configUrl = this.baseUrl.endsWith('/')
                 ? `${this.baseUrl}v0/management/config`
                 : `${this.baseUrl}/v0/management/config`;
-
-            console.log('Making request to configUrl:', configUrl);
 
             const response = await fetch(configUrl, {
                 method: 'GET',
@@ -1388,18 +1377,12 @@ class ConfigManager {
      * Refresh connection information
      */
     refreshConnection() {
-        const oldBaseUrl = this.baseUrl;
         const oldType = this.type;
 
         this.type = localStorage.getItem('type') || 'local';
         this.baseUrl = localStorage.getItem('base-url');
-        this.password = localStorage.getItem('password');
-
-        console.log('=== DEBUG: refreshConnection ===');
-        console.log('Old baseUrl:', oldBaseUrl);
-        console.log('New baseUrl:', this.baseUrl);
-        console.log('Old type:', oldType);
-        console.log('New type:', this.type);
+        // Use sessionStorage for password (more secure - expires with session)
+        this.password = sessionStorage.getItem('password');
 
         // Handle keep-alive based on type change
         if (oldType !== this.type) {

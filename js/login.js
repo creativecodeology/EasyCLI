@@ -81,6 +81,49 @@ function validateProxyUrl(proxyUrl) {
     };
 }
 
+// Remote server URL validation function
+function validateRemoteUrl(remoteUrl) {
+    if (!remoteUrl || remoteUrl.trim() === '') {
+        return { valid: false, error: 'Remote URL is required' };
+    }
+
+    const trimmedUrl = remoteUrl.trim();
+
+    // Check for valid URL format
+    try {
+        const url = new URL(trimmedUrl);
+
+        // Only allow http and https protocols
+        if (!['http:', 'https:'].includes(url.protocol)) {
+            return {
+                valid: false,
+                error: 'Only HTTP and HTTPS protocols are supported'
+            };
+        }
+
+        // Warn about HTTP (insecure) but allow it for local development
+        const isLocalhost = url.hostname === 'localhost' ||
+                           url.hostname === '127.0.0.1' ||
+                           url.hostname.startsWith('192.168.') ||
+                           url.hostname.startsWith('10.') ||
+                           url.hostname === '::1';
+
+        if (url.protocol === 'http:' && !isLocalhost) {
+            return {
+                valid: true,
+                warning: 'Warning: HTTP connections are not secure. Consider using HTTPS for remote servers.'
+            };
+        }
+
+        return { valid: true, error: null };
+    } catch (e) {
+        return {
+            valid: false,
+            error: 'Invalid URL format. Please enter a valid URL (e.g., https://example.com:8317)'
+        };
+    }
+}
+
 // Update dialog event listeners
 async function openSettingsWindowPreferNew() {
     try {
@@ -106,10 +149,9 @@ updateCancelBtn.addEventListener('click', async () => {
                 showError('CLIProxyAPI process start failed');
                 return;
             }
-            // Save the generated password for local mode HTTP requests
+            // Save the generated password for local mode HTTP requests (use sessionStorage for security)
             if (startRes.password) {
-                localStorage.setItem('local-management-key', startRes.password);
-                console.log('Saved local management key:', startRes.password);
+                sessionStorage.setItem('local-management-key', startRes.password);
             }
             // Start keep-alive mechanism for Local mode
             if (window.configManager) {
@@ -160,10 +202,9 @@ updateConfirmBtn.addEventListener('click', async () => {
                             showError('CLIProxyAPI process start failed');
                             return;
                         }
-                        // Save the generated password for local mode HTTP requests
+                        // Save the generated password for local mode HTTP requests (use sessionStorage for security)
                         if (startRes.password) {
-                            localStorage.setItem('local-management-key', startRes.password);
-                            console.log('Saved local management key:', startRes.password);
+                            sessionStorage.setItem('local-management-key', startRes.password);
                         }
                         // Start keep-alive mechanism for Local mode
                         if (window.configManager) {
@@ -252,10 +293,9 @@ passwordSaveBtn.addEventListener('click', async () => {
                         showError('CLIProxyAPI process start failed');
                         return;
                     }
-                    // Save the generated password for local mode HTTP requests
+                    // Save the generated password for local mode HTTP requests (use sessionStorage for security)
                     if (startRes.password) {
-                        localStorage.setItem('local-management-key', startRes.password);
-                        console.log('Saved local management key:', startRes.password);
+                        sessionStorage.setItem('local-management-key', startRes.password);
                     }
                 } catch (e) {
                     showError('CLIProxyAPI process start error');
@@ -403,10 +443,9 @@ async function handleConnectClick() {
                                     showError('CLIProxyAPI process start failed');
                                     return;
                                 }
-                                // Save the generated password for local mode HTTP requests
+                                // Save the generated password for local mode HTTP requests (use sessionStorage for security)
                                 if (startRes.password) {
-                                    localStorage.setItem('local-management-key', startRes.password);
-                                    console.log('Saved local management key:', startRes.password);
+                                    sessionStorage.setItem('local-management-key', startRes.password);
                                 }
                             } catch (e) {
                                 showError('CLIProxyAPI process start error');
@@ -442,6 +481,17 @@ async function handleConnectClick() {
         return;
     }
 
+    // Validate remote URL format and security
+    const urlValidation = validateRemoteUrl(remoteUrl);
+    if (!urlValidation.valid) {
+        showError(urlValidation.error);
+        return;
+    }
+    if (urlValidation.warning) {
+        // Show warning but continue
+        showError(urlValidation.warning);
+    }
+
     if (!password) {
         showError('Please enter a password');
         return;
@@ -452,23 +502,16 @@ async function handleConnectClick() {
         continueBtn.disabled = true;
         continueBtn.textContent = 'Connecting...';
 
-        // Save connection info to localStorage first
+        // Save connection info (use sessionStorage for password for security)
         localStorage.setItem('type', "remote");
         localStorage.setItem('base-url', remoteUrl);
-        localStorage.setItem('password', password);
-
-        console.log('=== DEBUG: Connection attempt ===');
-        console.log('Input remoteUrl:', remoteUrl);
-        console.log('Saved to localStorage base-url:', localStorage.getItem('base-url'));
-        console.log('Saved to localStorage type:', localStorage.getItem('type'));
+        sessionStorage.setItem('password', password);
 
         // Clear any cached config to ensure fresh connection
         localStorage.removeItem('config');
 
         // Create a fresh config manager instance to ensure no caching issues
         const freshConfigManager = new ConfigManager();
-        console.log('Fresh configManager baseUrl:', freshConfigManager.baseUrl);
-        console.log('Fresh configManager type:', freshConfigManager.type);
 
         // Test connection by getting config with fresh instance
         try {
@@ -482,8 +525,6 @@ async function handleConnectClick() {
             }
             return;
         }
-
-        console.log('Connection successful, data saved to localStorage');
 
         // Close current window and open settings page
         await openSettingsWindowPreferNew();
